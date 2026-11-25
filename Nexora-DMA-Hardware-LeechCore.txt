@@ -1,0 +1,82 @@
+0x282cd11f420 (3180):
+// Nexora / Echo Scanner Rule: Direct Memory Access (DMA) Hardware & LeechCore Detection
+// @emptybypass | nexora.ac
+
+const dmaRules = `rule dma_artifacts {
+    strings:
+        $d1 = "leechcore.dll" nocase
+        $d2 = "vmm.dll" nocase
+        $d3 = "fpga_mem.exe" nocase
+        $d4 = "FTD2XX.dll" nocase
+        $d5 = "pcileech" nocase
+        $d6 = "MemoryProcess.exe" nocase
+        $d7 = "dma_overlay" nocase
+        $d8 = "FTDI Device" nocase
+        $d9 = "kmbox_net" nocase
+        $d10 = "kmbox_b" nocase
+    condition:
+        any of them
+}`;
+
+const checkDMA = async () => {
+    if (platform !== "windows") return;
+
+    // 1. Monitoramento do USN Journal para artefatos DMA
+    const entries = journal();
+    const dmaBinaries = ["leechcore.dll", "vmm.dll", "memprocfs.exe", "ftd2xx.dll", "pcileech.exe", "dma.exe", "kmbox.exe"];
+    let detectedJournal = false;
+
+    for (let i = 0; i < entries.length; i++) {
+        const e = entries[i];
+        if (!detectedJournal && (e.reason === "deleted" || e.reason === "data_change" || e.reason === "close")) {
+            const lowerPath = e.path.toLowerCase();
+            for (const bin of dmaBinaries) {
+                if (lowerPath.endsWith(bin) && e.timestamp > time() - (86400 * 3)) {
+                    result(`DMA Hardware Interface Traces in USN Journal [[${bin}]]`, severe);
+                    log(`[DMA][JOURNAL] Path: ${e.path} | Reason: ${e.reason} | Time: ${secondsToHms(time() - e.timestamp)} ago`);
+                    detectedJournal = true;
+                    break;
+                }
+            }
+        }
+    }
+
+    // 2. Prefetch de Controladores DMA e Kmbox
+    await walk("C:/Windows/Prefetch", async (filePath) => {
+        const fileName = filePath.substring(filePath.lastIndexOf("\\") + 1).toLowerCase();
+        if (!fileName.endsWith(".pf")) return;
+
+        const suspiciousApps = ["memprocfs", "pcileech", "kmbox", "screamer", "enigma", "squirrel", "secondpc", "dma_"];
+        for (const target of suspiciousApps) {
+            if (fileName.includes(target)) {
+                const pf = await prefetch(filePath);
+                if (pf && pf.last_run_times?.length) {
+                    const lastRun = Math.max(...pf.last_run_times);
+                    if (time() - lastRun < (86400 * 7)) {
+                        result(`DMA Controller Execution Recorded in Prefetch [[${fileName}]]`, severe);
+                        log(`[DMA][PREFETCH] App: ${fileName} | Last Run: ${secondsToHms(time() - lastRun)} ago`);
+                    }
+                }
+            }
+        }
+    });
+
+    // 3. Scan YARA em diretórios de extração temporários
+    const scanDirs = [
+        `${currentUserFolder}\\AppData\\Local\\Temp`,
+        `C:\\Windows\\Temp`
+    ];
+
+    for (const dir of scanDirs) {
+        await walk(dir, async (file) => {
+            if (fileSize(file) > 15 * 1024 * 1024) return;
+            const res = yara(file, dmaRules);
+            if (res && res.length) {
+                result(`DMA Payload Detected by YARA [[${file}]]`, severe);
+                log(`[DMA][YARA] File: ${file} matched: ${res.join(", ")}`);
+            }
+        });
+    }
+};
+
+checkDMA();

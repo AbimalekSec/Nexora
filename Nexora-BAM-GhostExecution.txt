@@ -1,0 +1,50 @@
+0x282cde41a80 (3890):
+// Nexora / Echo Scanner Rule: Background Activity Moderator (BAM) Ghost Execution Tracker
+// @emptybypass | nexora.ac
+
+const checkGhostBAMExecutions = () => {
+    if (platform !== "windows") return;
+
+    const psCmd = `
+        $path = "HKLM:\\SYSTEM\\CurrentControlSet\\Services\\bam\\State\\UserSettings"
+        Get-ChildItem $path -ErrorAction SilentlyContinue | ForEach-Object {
+            $sid = $_.PSChildName
+            $subKey = Get-ItemProperty $_.PSPath -ErrorAction SilentlyContinue
+            $subKey.PSObject.Properties | Where-Object { $_.Name -like "*\\*" } | ForEach-Object {
+                $rawHex = [System.BitConverter]::ToString($_.Value)
+                Write-Output "ECHO_KV|BAM|$sid|$($_.Name)|$rawHex"
+            }
+        }
+    `;
+
+    const rawOutput = performPS(psCmd);
+    if (!rawOutput) return;
+
+    const lines = rawOutput.split(/\r?\n/);
+    const suspiciousPaths = ["\\temp\\", "\\appdata\\local\\temp\\", "\\downloads\\", "\\desktop\\"];
+    const cheatKeywords = ["inject", "bypass", "eulen", "redengine", "skript", "dma", "tz", "loader", "spoofer", "cleaner"];
+
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i].trim();
+        if (line.indexOf("ECHO_KV|BAM|") !== 0) continue;
+
+        const parts = line.split("|");
+        if (parts.length < 5) continue;
+
+        const appPath = parts[3].toLowerCase();
+        const appName = appPath.substring(appPath.lastIndexOf("\\") + 1);
+
+        const isSuspiciousLocation = suspiciousPaths.some(p => appPath.includes(p));
+        const hasCheatName = cheatKeywords.some(k => appName.includes(k));
+
+        if (hasCheatName) {
+            result(`BAM Recorded Prohibited Binary Execution [[${appName}]]`, severe);
+            log(`[BAM][CHEAT] Found: ${parts[3]} recorded under SID ${parts[2]}`);
+        } else if (isSuspiciousLocation && (appName.startsWith("tmp") || appName.startsWith("rad") || appName.endsWith(".tmp.exe"))) {
+            result(`Suspicious Dropper Execution Recorded in BAM [[${appName}]]`, warning);
+            log(`[BAM][DROPPER] Transient binary in BAM: ${parts[3]}`);
+        }
+    }
+};
+
+checkGhostBAMExecutions();

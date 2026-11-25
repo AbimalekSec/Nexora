@@ -1,0 +1,39 @@
+0x282cdeef550 (3120):
+// Nexora / Echo Scanner Rule: LOLBin DLL Hijacking & Proxying (D3DCompiler / DirectX)
+// @emptybypass | nexora.ac
+
+const checkFiles = (directory, callback) => walk(directory, async file => callback(file));
+
+const targetDlls = [
+    "d3dx11_43.dll", "d3dcompiler_43.dll", "d3dcompiler_47.dll", "dxgi.dll", "version.dll"
+];
+
+const systemWhitelist = [
+    "c:\\windows\\system32", "c:\\windows\\syswow64", "c:\\program files", "c:\\program files (x86)"
+];
+
+const checkProxyDLLs = async () => {
+    if (platform !== "windows") return;
+
+    // Varre a pasta do FiveM e AppData por DLLs de proxy/hijacking
+    const checkPaths = [
+        `${currentUserFolder}\\AppData\\Local\\FiveM\\FiveM.app`,
+        `${currentUserFolder}\\AppData\\Local\\Temp`
+    ];
+
+    for (const root of checkPaths) {
+        await checkFiles(root, async (filePath) => {
+            const fileName = filePath.substring(filePath.lastIndexOf("\\") + 1).toLowerCase();
+            if (targetDlls.includes(fileName)) {
+                // Checa se o arquivo é assinado ou legítimo
+                const sz = fileSize(filePath);
+                if (sz > 0 && sz < 3 * 1024 * 1024) {
+                    result(`Suspicious DLL Proxy in FiveM Path [[${fileName}]]`, severe);
+                    log(`[LOLBIN][HIJACK] Found: ${filePath} (Size: ${sz} bytes)`);
+                }
+            }
+        });
+    }
+};
+
+checkProxyDLLs();

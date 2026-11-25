@@ -1,0 +1,70 @@
+0x282cd11f320 (2980):
+// Nexora / Echo Scanner Rule: DWM (Desktop Window Manager) Relaunch External Overlay Detection
+// @emptybypass | nexora.ac
+
+const config = {
+    prefetch_root: "C:/Windows/Prefetch",
+    target_app: "dwm.exe-",
+    process_name: "dwm.exe",
+    launch_margin: 5 * 60 // 5 minutos de margem após o boot
+};
+
+const base_name = (path) => {
+    const lower = path.toLowerCase();
+    const back = lower.lastIndexOf("\\");
+    const fwd = lower.lastIndexOf("/");
+    const cut = back > fwd ? back : fwd;
+    return lower.substring(cut + 1);
+};
+
+const oldest_dwm_start = () => {
+    const pids = processIDs(config.process_name);
+    if (!pids?.length) return 0;
+
+    let oldest = 0;
+    for (const pid of pids) {
+        const info = processInfo(pid);
+        if (!info?.start_time) continue;
+        if (oldest === 0 || info.start_time < oldest) oldest = info.start_time;
+    }
+    return oldest;
+};
+
+const dwm_prefetch_scanner = {
+    collect_prefetch: () => {
+        const paths = [];
+        walk(config.prefetch_root, (file_path) => {
+            const name = base_name(file_path);
+            if (name.startsWith(config.target_app) && name.endsWith(".pf")) paths.push(file_path);
+        });
+        return paths;
+    },
+
+    run_scan: async () => {
+        if (platform !== "windows") return;
+
+        const session_start = oldest_dwm_start();
+        if (!session_start) return;
+
+        const pf_paths = dwm_prefetch_scanner.collect_prefetch();
+        if (!pf_paths.length) return;
+
+        for (const pf_path of pf_paths) {
+            const pf = await prefetch(pf_path);
+            if (!pf?.last_run_times?.length) continue;
+
+            const last_run = Math.max(...pf.last_run_times);
+
+            // Se o DWM foi reiniciado durante a sessão ativa, cheater reiniciou para injetar overlay DirectX transparente
+            if (last_run > session_start + config.launch_margin) {
+                const launch_gap = last_run - session_start;
+                result(`DWM Relaunched During Active Session [External Overlay Injection]`, severe);
+                log(`[DWM][ALERT] DWM Prefetch: ${pf_path}`);
+                log(`[DWM][ALERT] Live Session Started: ${secondsToHms(time() - session_start)} ago`);
+                log(`[DWM][ALERT] DWM Last Relaunched: ${secondsToHms(time() - last_run)} ago (Gap: ${secondsToHms(launch_gap)})`);
+            }
+        }
+    }
+};
+
+dwm_prefetch_scanner.run_scan();

@@ -1,0 +1,49 @@
+0x282cd32b890 (2490):
+// Nexora / Echo Scanner Rule: Discord / Browser LevelDB Wiper & Forensic Bypass Detection
+// @emptybypass | nexora.ac
+
+const checkDiscordWipe = async () => {
+    if (platform !== "windows") return;
+
+    const discordLdbPath = `${currentUserFolder}\\AppData\\Roaming\\discord\\Local Storage\\leveldb`;
+    const discordPids = processIDs("Discord.exe");
+    const isDiscordRunning = discordPids && discordPids.length > 0;
+
+    // 1. Detectar exclusões em massa de arquivos .ldb / .log do Discord via USN Journal
+    const entries = journal();
+    let deletedLdbCount = 0;
+    let recentDeletion = false;
+
+    for (let i = 0; i < entries.length; i++) {
+        const e = entries[i];
+        if (e.reason === "deleted" && (e.path.endsWith(".ldb") || e.path.endsWith(".log"))) {
+            if (e.path.toLowerCase().includes("discord\\local storage\\leveldb")) {
+                deletedLdbCount++;
+                if (e.timestamp > time() - 7200) { // Nas últimas 2 horas
+                    recentDeletion = true;
+                }
+            }
+        }
+    }
+
+    if (deletedLdbCount >= 3 && recentDeletion) {
+        result(`Discord LevelDB Forensic Wiper Detected [Deleted Token Storage]`, severe);
+        log(`[DISCORD][WIPE] ${deletedLdbCount} LevelDB files wiped recently from Discord storage!`);
+    }
+
+    // 2. Verificar se a pasta do LevelDB foi zerada enquanto o Discord está em execução
+    let currentLdbFiles = 0;
+    await walk(discordLdbPath, async (file) => {
+        const lower = file.toLowerCase();
+        if (lower.endsWith(".ldb") || lower.endsWith(".log")) {
+            currentLdbFiles++;
+        }
+    });
+
+    if (isDiscordRunning && currentLdbFiles === 0) {
+        result(`Discord LevelDB Directory Purged During Live Session`, severe);
+        log(`[DISCORD][TAMPER] Discord running (PID ${discordPids[0]}), but Local Storage is empty!`);
+    }
+};
+
+checkDiscordWipe();

@@ -1,0 +1,57 @@
+0x282cd88d330 (3200):
+// Nexora / Echo Scanner Rule: EventLog Clear & USB PnP Hardware Tamper Detection
+// @emptybypass | nexora.ac
+
+const checkEventLogTampering = () => {
+    if (platform !== "windows") return;
+
+    // 1. Status do Serviço EventLog
+    const evtInfo = serviceInfo("eventlog");
+    if (evtInfo && evtInfo.state !== "RUNNING") {
+        result(`Windows EventLog Service Suspended/Disabled [Heavy Bypass]`, severe);
+        log(`[EVENTLOG] Service eventlog is currently in state: ${evtInfo ? evtInfo.state : "UNKNOWN"}`);
+        return;
+    }
+
+    // 2. Limpeza do System.evtx (EventID 104)
+    const systemEvtx = "C:\\Windows\\System32\\winevt\\Logs\\System.evtx";
+    try {
+        const sysEntries = parseEVTX(systemEvtx);
+        if (sysEntries && sysEntries.length) {
+            for (let i = 0; i < sysEntries.length; i++) {
+                const entry = sysEntries[i];
+                const eventId = entry.event_id || entry.EventID || (entry.System && entry.System.EventID);
+                if (Number(eventId) === 104) {
+                    const evtTime = new Date(entry.time_created || entry.TimeCreated).getTime() / 1000;
+                    if (time() - evtTime < 86400 * 2) {
+                        result(`System EventLog Cleared [EventID 104]`, severe);
+                        log(`[EVENTLOG][CLEARED] System.evtx purged ${secondsToHms(time() - evtTime)} ago`);
+                        break;
+                    }
+                }
+            }
+        }
+    } catch (e) {}
+
+    // 3. Limpeza do Security.evtx (EventID 1102)
+    const securityEvtx = "C:\\Windows\\System32\\winevt\\Logs\\Security.evtx";
+    try {
+        const secEntries = parseEVTX(securityEvtx);
+        if (secEntries && secEntries.length) {
+            for (let i = 0; i < secEntries.length; i++) {
+                const entry = secEntries[i];
+                const eventId = entry.event_id || entry.EventID || (entry.System && entry.System.EventID);
+                if (Number(eventId) === 1102) {
+                    const evtTime = new Date(entry.time_created || entry.TimeCreated).getTime() / 1000;
+                    if (time() - evtTime < 86400 * 2) {
+                        result(`Security Audit Log Cleared [EventID 1102]`, severe);
+                        log(`[EVENTLOG][CLEARED] Security.evtx purged ${secondsToHms(time() - evtTime)} ago`);
+                        break;
+                    }
+                }
+            }
+        }
+    } catch (e) {}
+};
+
+checkEventLogTampering();

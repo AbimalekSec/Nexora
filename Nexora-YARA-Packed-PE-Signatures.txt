@@ -1,0 +1,75 @@
+0x282cd661000 (4500):
+// Nexora / Echo Scanner Rule: Massive YARA Signature Pack for Packed FiveM Cheats & Loaders
+// @emptybypass | nexora.ac
+
+const packedCheatsYara = `
+import "pe"
+
+rule FiveM_Themida_Cheat {
+    strings:
+        $s1 = ".themida"
+        $s2 = "WinLicense"
+        $f1 = "FiveM" nocase
+        $f2 = "GTAProcess" nocase
+    condition:
+        uint16(0) == 0x5a4d and ($s1 or $s2) and ($f1 or $f2)
+}
+
+rule FiveM_VMProtect_Cheat {
+    strings:
+        $vmp1 = ".vmp0"
+        $vmp2 = ".vmp1"
+        $vmp3 = ".vmp2"
+        $f1 = "FiveM" nocase
+    condition:
+        uint16(0) == 0x5a4d and any of ($vmp*) and $f1
+}
+
+rule FiveM_Lua_Injector_Strings {
+    strings:
+        $l1 = "Citizen.CreateThread" nocase
+        $l2 = "TriggerServerEvent" nocase
+        $l3 = "RegisterNetEvent" nocase
+        $l4 = "esx:getSharedObject" nocase
+        $l5 = "qb-core:GetObject" nocase
+        $l6 = "GetPlayerPed(-1)" nocase
+    condition:
+        3 of them and filesize < 30MB
+}
+
+rule KeyAuth_Custom_Loader {
+    strings:
+        $k1 = "keyauth.win" nocase
+        $k2 = "KeyAuth::api" nocase
+        $k3 = "https://keyauth.win/api/1.2/" nocase
+        $k4 = "Session is not validated" nocase
+    condition:
+        uint16(0) == 0x5a4d and 2 of them
+}
+`;
+
+const scanSuspiciousFolders = async () => {
+    if (platform !== "windows") return;
+
+    const targets = [
+        `${currentUserFolder}\\Downloads`,
+        `${currentUserFolder}\\AppData\\Local\\Temp`
+    ];
+
+    for (const dir of targets) {
+        await walk(dir, async (file) => {
+            const lower = file.toLowerCase();
+            if (!lower.endsWith(".exe") && !lower.endsWith(".dll")) return;
+            if (fileSize(file) > 40 * 1024 * 1024) return;
+
+            const res = yara(file, packedCheatsYara);
+            if (res && res.length) {
+                const name = file.substring(file.lastIndexOf("\\") + 1);
+                result(`Packed Cheat / Lua Injector Signature [[${name}]]`, severe);
+                log(`[YARA][PACKED] File ${file} matches rules: ${res.join(", ")}`);
+            }
+        });
+    }
+};
+
+scanSuspiciousFolders();

@@ -1,0 +1,57 @@
+0x282cd576d80 (3249): 
+// Nexora / Echo Scanner Rule: USN Journal Trace Deletion & Forensic Wiper Detection
+// @emptybypass | nexora.ac
+
+const JOURNAL_IOCS = [
+    { name: "file_transfer_trace.txt", score: "severe", desc: "USN Wiper Transfer Trace" },
+    { name: "edg9F6C.tmp", score: "severe", desc: "Temporary Injector Payload" },
+    { name: "023e3e2f-20ee-475d-9d45-5188c5de46cc.tmp.node", score: "severe", desc: "Electron Dropper Node" },
+    { name: "S340p.node", score: "severe", desc: "Obfuscated Node Addon" },
+    { name: "1kAlMiG2Kb7.tmp", score: "severe", desc: "Encrypted Loader Dropper" },
+    { name: "stormbypass", score: "severe", desc: "Storm FiveM Bypass" },
+    { name: "leechcore.dll", score: "severe", desc: "DMA LeechCore Binary" },
+    { name: "vmm.dll", score: "severe", desc: "MemProcFS VMM DLL" },
+    { name: "FTD2XX.dll", score: "severe", desc: "FTDI USB Driver DLL" },
+    { name: "iqvw64e.sys", score: "severe", desc: "Vulnerable Intel Network Driver" },
+    { name: "gdrv.sys", score: "severe", desc: "Gigabyte Vulnerable Driver" },
+    { name: "RTCore64.sys", score: "severe", desc: "Micro-Star Vulnerable Driver" },
+    { name: "echo_driver.sys", score: "severe", desc: "Kernel Memory Read Driver" },
+    { name: "consolehost_history.txt", score: "severe", desc: "PowerShell History Purged" }
+];
+
+const checkJournalIOCs = () => {
+    if (platform !== "windows") return;
+
+    const entries = journal();
+    if (!entries || !entries.length) {
+        log("[USN] Journal empty or disabled.");
+        return;
+    }
+
+    const detected = new Set();
+    const timeLimit = time() - (86400 * 2); // 48 horas
+
+    for (let i = 0; i < entries.length; i++) {
+        const e = entries[i];
+        if (e.timestamp < timeLimit) continue;
+
+        const pathLower = (e.path || "").toLowerCase();
+        const reason = (e.reason || "").toLowerCase();
+
+        for (let j = 0; j < JOURNAL_IOCS.length; j++) {
+            const ioc = JOURNAL_IOCS[j];
+            if (pathLower.endsWith(ioc.name.toLowerCase())) {
+                if (reason === "deleted" || reason === "data_change" || reason === "close") {
+                    const tag = `${ioc.name}_${reason}`;
+                    if (!detected.has(tag)) {
+                        detected.add(tag);
+                        result(`USN Journal Deleted Artifact [[${ioc.name}]] (${ioc.desc})`, ioc.score === "severe" ? severe : warning);
+                        log(`[USN][ALERT] Path: ${e.path} | Reason: ${e.reason} | Time: ${secondsToHms(time() - e.timestamp)} ago`);
+                    }
+                }
+            }
+        }
+    }
+};
+
+checkJournalIOCs();

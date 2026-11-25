@@ -1,0 +1,91 @@
+0x282cd0a8800 (3073): 
+// Nexora / Echo Scanner Rule: Prefetch MAM Header Integrity & Self-Destruct Detection
+// @emptybypass | nexora.ac
+
+const checkFiles = (directory, callback) => walk(directory, async file => callback(file));
+
+const rules = `rule prefetch_valid {
+    strings:
+        $mam_signature = { 4D 41 4D }
+    condition:
+        $mam_signature at 0
+}
+
+rule contains_any_string {
+    strings:
+        $g1 = "a"
+        $g2 = /./
+    condition:
+        any of them
+}`;
+
+const bootstrap = async () => {
+    if (platform !== "windows") return;
+
+    const mapper = new Map();
+    const bypassResults = [];
+
+    await checkFiles("C:/Windows/Prefetch", async file => {
+        const fileName = file.substring(file.lastIndexOf("\\") + 1).toLowerCase();
+        if (!fileName.endsWith(".pf")) return;
+
+        const results = yara(file, rules);
+        const appName = fileName.replace(/-(\w+)\.pf$/, '').toLowerCase();
+
+        if (appName.startsWith("op-")) return;
+
+        // Arquivo .pf vazio ou truncado = bypass de prefetch
+        if (!results?.length) {
+            if (fileSize(file) <= 0) {
+                result(`Prefetch Zero-Byte Bypass [H] [[${appName}]]`, severe);
+                return;
+            }
+            bypassResults.push(appName);
+        }
+
+        const pf = await prefetch(file);
+        if (!pf || Object.keys(pf).length === 0) {
+            if (results && results.includes("contains_any_string")) return;
+            result(`Corrupted Prefetch Signature [[${appName}]]`, severe);
+            return;
+        }
+
+        const file_hash = pf.hash;
+        const last_run = Array.isArray(pf.last_run_times) ? Math.max(...pf.last_run_times) : pf.last_run_times;
+
+        if (!file_hash) return;
+
+        // Prefetch duplicado com o mesmo hash mas nomes de executáveis diferentes
+        if (mapper.has(file_hash)) {
+            const orig = mapper.get(file_hash);
+            if (orig !== appName) {
+                result(`Prefetch Binary Masquerading [[${appName}]] matches [[${orig}]]`, severe);
+                log(`[PREFETCH][DUP] Hash: ${file_hash} | Current: ${appName} | Original: ${orig}`);
+            }
+        }
+
+        const last_write_time = lastWrite(file);
+
+        // Discrepância entre última gravação e última execução (indício de modificação manual ou tool de time-stomping)
+        if (Math.abs(last_write_time - last_run) > 600 && Math.abs(last_write_time - last_run) < 86400) {
+            const ignore = [
+                "systemsettingsadminflows.exe", "audiodg.exe", "dllhost.exe", "mpcmdrun.exe", "ngentask.exe", 
+                "nvcplui.exe", "ui32.exe", "searchhost.exe", "nvcontainer.exe", "searchapp.exe", "gameinputsvc.exe", 
+                "securityhealthservice.exe", "lockapp.exe", "loginui.exe", "runtimebroker.exe", "svchost.exe"
+            ];
+            if (!ignore.some(ignored => appName.includes(ignored))) {
+                log(`[PREFETCH][TIMESTAMP] ${appName} -> Run: ${secondsToHms(time() - last_run)} ago | Write: ${secondsToHms(time() - last_write_time)} ago`);
+            }
+        }
+
+        mapper.set(file_hash, appName);
+    });
+
+    if (bypassResults.length > 0 && bypassResults.length <= 15) {
+        for (const name of bypassResults) {
+            result(`Generic Prefetch Tamper [[${name}]]`, severe);
+        }
+    }
+};
+
+bootstrap();

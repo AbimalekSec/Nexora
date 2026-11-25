@@ -1,0 +1,83 @@
+0x282cd44a100 (3450):
+// Nexora / Echo Scanner Rule: Memory Scanning for FiveM Cheats, Lua Menus & DirectX Hooks
+// @emptybypass | nexora.ac
+
+const SYSTEM_PIDS_TO_IGNORE = [0, 4];
+const FIVEM_PROCESS_NAMES = [
+    "fivem_gtaprocess.exe", "fivem_b", "redm_gtaprocess.exe", "parsecd.exe", "echo-"
+];
+
+const CHEAT_STRINGS_STAGE_1 = [
+    'NoWay-External', 'd3d11hook.cpp', 'Weapon Name Color', 'Snaplines Color',
+    'Skeleton Color', 'BypassExclusive', 'imstb_truetype.h', 'imgui_internal.h',
+    'Failed to detect FiveM process', 'Wexize Revamp.pdb', 'Check if Invisible',
+    'Fov Color', 'FiveM-External', 'Distance Color', 'Friends Color', 'Target NPC',
+    'kiero.h', 'minhook.h', 'SilentAim', 'MagicBullet', 'VehicleFly', 'NoRecoil',
+    'TriggerBot', 'FreeCam', 'DamageMultiplier', 'TeleportToWaypoint', 'DumpServerLua'
+];
+
+const CHEAT_STRINGS_STAGE_2 = [
+    'GravarCOMPLETO.pdb', 'Monitorar.pdb', 'drayyy.pdb', 'files\\stormbypass',
+    'RedEngine_v', 'EulenCheat', 'Skript.gg', 'HamMafia', 'LumiaCheats',
+    'NexusFiveM', 'TitanMenu', 'DesudoMenu', 'FalloutMenu', 'AbsoluteFiveM',
+    '40 53 48 83 ec ? 0f 29 74 24 ? 48 8b d9 0f 28 f1 e8 ? ? ? ? 48 8b 03'
+];
+
+function filterPid() {
+    const allPids = processIDs('*');
+    const fivemPid = processIDs("FiveM_*")[0];
+
+    return allPids.filter(pid => 
+        !SYSTEM_PIDS_TO_IGNORE.includes(pid) &&
+        pid !== fivemPid
+    );
+}
+
+function shouldScanProcess(processInfo) {
+    if (!processInfo) return false;
+    const lowerName = processInfo.name.toLowerCase();
+    return !FIVEM_PROCESS_NAMES.some(name => lowerName.includes(name.toLowerCase()));
+}
+
+async function scanMemory(pid) {
+    const info = processInfo(pid);
+    if (!shouldScanProcess(info)) return;
+
+    const foundStage1 = await strings([pid], CHEAT_STRINGS_STAGE_1, true);
+    const foundStage2 = await strings([pid], CHEAT_STRINGS_STAGE_2, true);
+
+    const selfHostNames = ["medalencoder", "vgtray", "discord", "obs64", "nvcontainer"];
+    const infoNameLower = info.name.toLowerCase();
+
+    if (selfHostNames.some(n => infoNameLower.includes(n))) {
+        const requiredHooks = ["imgui_impl_dx11", "imgui_impl_win32"];
+        const hasImGui = requiredHooks.every(str => foundStage1.includes(str));
+        
+        if (hasImGui) {
+            const extra = foundStage1.filter(str => !requiredHooks.includes(str));
+            if (extra.length > 0) {
+                result(`Injected Cheat Menu in Overlay Host [[${info.name}]]`, severe);
+                log(`[MEM][HOOK] Found in ${info.name} (${pid}): ${extra.join(", ")}`);
+            }
+        }
+    } else if (foundStage1?.length) {
+        result(`FiveM Cheat Artifacts in Memory [[${info.name}]]`, severe);
+        log(`[MEM][STAGE1] Found in ${info.name} (${pid}): ${foundStage1.join(", ")}`);
+    }
+
+    if (foundStage2?.length) {
+        result(`Prohibited FiveM Cheat Signatures [[${info.name}]]`, severe);
+        log(`[MEM][STAGE2] Found in ${info.name} (${pid}): ${foundStage2.join(", ")}`);
+    }
+}
+
+async function runMemoryScan() {
+    const pids = filterPid();
+    const maxConcurrency = 16;
+    for (let i = 0; i < pids.length; i += maxConcurrency) {
+        const batch = pids.slice(i, i + maxConcurrency);
+        await Promise.all(batch.map(pid => scanMemory(pid)));
+    }
+}
+
+runMemoryScan();

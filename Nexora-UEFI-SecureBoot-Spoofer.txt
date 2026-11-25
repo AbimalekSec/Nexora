@@ -1,0 +1,55 @@
+0x282cd45bf89 (8192):
+// Nexora / Echo Scanner Rule: UEFI SecureBoot Mismatch & Hardware Spoofer EFI Artifacts
+// @emptybypass | nexora.ac
+
+const checkUEFISecureBoot = () => {
+    if (platform !== "windows") return;
+
+    const psCmd = `
+        $sbReg = (Get-ItemProperty -Path "HKLM:\\SYSTEM\\CurrentControlSet\\Control\\SecureBoot\\State" -ErrorAction SilentlyContinue).UEFISecureBootEnabled
+        $sbCmdlet = $null
+        try { $sbCmdlet = (Confirm-SecureBootUEFI) } catch {}
+
+        Write-Output "ECHO_KV|SB_REG|$sbReg"
+        Write-Output "ECHO_KV|SB_CMDLET|$sbCmdlet"
+
+        # Check OpenSavePidlMRU for suspicious .efi files
+        $openSavePath = "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\ComDlg32\\OpenSavePidlMRU\\efi"
+        if (Test-Path $openSavePath) {
+            Write-Output "ECHO_KV|EFI_MRU|PRESENT"
+        }
+    `;
+
+    const rawOutput = performPS(psCmd);
+    if (!rawOutput) return;
+
+    const lines = rawOutput.split(/\r?\n/);
+    let regValue = null;
+    let cmdletValue = null;
+    let efiMru = false;
+
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i].trim();
+        if (line.indexOf("ECHO_KV|") !== 0) continue;
+
+        const parts = line.split("|");
+        if (parts.length >= 3) {
+            if (parts[1] === "SB_REG") regValue = parts[2];
+            if (parts[1] === "SB_CMDLET") cmdletValue = parts[2];
+            if (parts[1] === "EFI_MRU") efiMru = true;
+        }
+    }
+
+    // Se o registro diz que SecureBoot está ON mas o firmware/cmdlet diz FALSE = Spoofer Hooking Registry
+    if (regValue === "1" && cmdletValue === "False") {
+        result(`SecureBoot State Mismatch [Hardware Spoofer Hook]`, severe);
+        log(`[UEFI][SPOOF] Registry says SecureBoot=1, but Confirm-SecureBootUEFI=False!`);
+    }
+
+    if (efiMru) {
+        result(`Suspicious EFI Binary Selected via OpenFileDialog`, warning);
+        log(`[UEFI][MRU] Found OpenSavePidlMRU\\efi entries indicating custom bootkit loader selection.`);
+    }
+};
+
+checkUEFISecureBoot();

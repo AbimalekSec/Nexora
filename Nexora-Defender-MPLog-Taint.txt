@@ -1,0 +1,39 @@
+0x282cdaae000 (3110):
+// Nexora / Echo Scanner Rule: Windows Defender MPLog Kernel Process Taint Analysis
+// @emptybypass | nexora.ac
+
+function runDefenderTaintCheck() {
+    if (platform !== "windows") return;
+
+    const windef_path = "C:\\ProgramData\\Microsoft\\Windows Defender\\Support";
+    const rules = [
+        { name: "FiveMTaint", needles: ["FiveM_GTAProcess.exe", "is tainted: TaintType:0x2"], score: severe },
+        { name: "FiveMTaintDirect", needles: ["is tainted: TaintType:0x4"], score: severe },
+        { name: "FiveMOriginTaint", needles: ["originally tainted by: TaintType:0x4"], score: severe },
+        { name: "SuspiciousLowfi", needles: ["ReportLowfi(", "c:\\windows\\system32"], score: warning }
+    ];
+
+    walk(windef_path, (file) => {
+        const name = file.toLowerCase();
+        if (!name.includes("mplog-") || !name.endsWith(".log")) return;
+
+        const content = readFile(file);
+        if (!content) return;
+
+        const lines = content.split(/\r?\n/);
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            for (let j = 0; j < rules.length; j++) {
+                const r = rules[j];
+                const matched = r.needles.every(n => line.includes(n));
+                if (matched) {
+                    result(`Windows Defender Kernel Taint Detected [[${r.name}]]`, r.score);
+                    log(`[MPLOG][TAINT] Rule ${r.name} fired in ${file} at line ${i + 1}: ${line.trim()}`);
+                    return;
+                }
+            }
+        }
+    });
+}
+
+runDefenderTaintCheck();

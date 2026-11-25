@@ -1,0 +1,54 @@
+0x282cd78a550 (2980):
+// Nexora / Echo Scanner Rule: Bring Your Own Vulnerable Driver (BYOVD) Kernel Mapper Detection
+// @emptybypass | nexora.ac
+
+const VULNERABLE_DRIVERS = [
+    "iqvw64e.sys", "gdrv.sys", "rtcore64.sys", "mhyprot2.sys", "procexp152.sys",
+    "echo_driver.sys", "dbutil_2_3.sys", "eneio64.sys", "cpuz141.sys", "atsiv.sys",
+    "speedfan.sys", "asioctl.sys", "inpoutx64.sys"
+];
+
+const checkBYOVD = async () => {
+    if (platform !== "windows") return;
+
+    // 1. Pesquisa no USN Journal por drivers vulneráveis despejados em disco
+    const journalEntries = journal();
+    let detectedDriver = false;
+
+    for (let i = 0; i < journalEntries.length; i++) {
+        const entry = journalEntries[i];
+        if (entry.timestamp > time() - 86400) {
+            const pathLower = entry.path.toLowerCase();
+            for (const drv of VULNERABLE_DRIVERS) {
+                if (pathLower.endsWith(drv)) {
+                    result(`Vulnerable Kernel Driver Artifact in USN Journal [[${drv}]]`, severe);
+                    log(`[BYOVD][JOURNAL] Driver: ${drv} at ${entry.path} (Reason: ${entry.reason})`);
+                    detectedDriver = true;
+                    break;
+                }
+            }
+        }
+    }
+
+    // 2. Prefetch de Mappers de Drivers (kdmapper, KDU, etc.)
+    await walk("C:/Windows/Prefetch", async (pfFile) => {
+        const name = pfFile.toLowerCase();
+        if (!name.endsWith(".pf")) return;
+
+        const mappers = ["kdmapper", "kdu.exe", "drvload", "driverload", "map.exe", "injector.exe"];
+        for (const m of mappers) {
+            if (name.includes(m)) {
+                const pf = await prefetch(pfFile);
+                if (pf && pf.last_run_times?.length) {
+                    const lastRun = Math.max(...pf.last_run_times);
+                    if (time() - lastRun < (86400 * 3)) {
+                        result(`Kernel Driver Mapper Executed in Prefetch [[${name}]]`, severe);
+                        log(`[BYOVD][MAPPER] Found ${name} run ${secondsToHms(time() - lastRun)} ago`);
+                    }
+                }
+            }
+        }
+    });
+};
+
+checkBYOVD();
